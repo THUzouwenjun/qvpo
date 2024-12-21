@@ -14,12 +14,13 @@ from logger import Logger
 import datetime
 from tqdm import tqdm
 from vector_env import VectorEnv
-
+import csv
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 def readParser():
     parser = argparse.ArgumentParser(description='Diffusion Policy')
     parser.add_argument('--env_name', default="Hopper-v3",
                         help='Mujoco Gym environment (default: Hopper-v3)')
-    parser.add_argument('--seed', type=int, default=0, metavar='N',
+    parser.add_argument('--seed', type=int, default=200, metavar='N',
                         help='random seed (default: 0)')
 
     parser.add_argument('--num_steps', type=int, default=1500000, metavar='N',
@@ -157,7 +158,7 @@ def main(args=None, logger=None, id=None):
     memory_size = 1e6
     num_steps = args.num_steps
     start_steps = 1000 # 20 samples per step, total 20000 samples for warm-up
-    eval_interval = 10000
+    eval_interval = 15000
     updates_per_step = 1
     batch_size = args.batch_size
     log_interval = 10
@@ -172,6 +173,20 @@ def main(args=None, logger=None, id=None):
 
     state = env.reset()
     states = vec_enc.reset()
+
+    wall_time_list = []
+    step_list = []
+    return_list = []
+
+    # 获取当前日期和时间，格式为 YYYY-MM-DD_HH-MM-SS
+    current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    # 生成保存目录，添加当前日期和时间
+    save_dir = os.path.join('./results', f"{prefix}_{name}")
+    os.makedirs(save_dir, exist_ok=True)
+    with open(os.path.join(save_dir, f"{id}_qvpo_s{args.seed}.csv"), 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["wall_time", "step", "return"])
+
     # while steps < num_steps:
     for i in tqdm(range(num_steps), desc="Training Progress"):
         done = False
@@ -200,13 +215,15 @@ def main(args=None, logger=None, id=None):
 
         if steps % eval_interval == 0:
             tmp_result = evaluate(eval_env, agent, steps)
+
             if tmp_result > best_result:
                 best_result = tmp_result
                 agent.save_model(os.path.join('./results', prefix + '_' + name), id=id)
-            # self.save_models()
-
-        # if episodes % log_interval == 0:
-        #     writer.add_scalar('reward/train', episode_reward, steps)
+            
+            # save to csv
+            with open(os.path.join(save_dir, f"{id}_qvpo_s{args.seed}.csv"), 'a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([datetime.datetime.now().strftime("%y_%m_%d_%H_%M_%S"), steps, tmp_result])
 
 
 if __name__ == "__main__":
