@@ -157,7 +157,7 @@ def main(args=None, logger=None, id=None):
 
     memory_size = 1e6
     num_steps = args.num_steps
-    start_steps = 1000 # 20 samples per step, total 20000 samples for warm-up
+    start_steps = 1500 # 20 samples per step, total 30000 samples for warm-up
     eval_interval = 15000
     updates_per_step = 1
     batch_size = args.batch_size
@@ -171,15 +171,7 @@ def main(args=None, logger=None, id=None):
     steps = 0
     best_result = -float('inf')
 
-    state = env.reset()
     states = vec_enc.reset()
-
-    wall_time_list = []
-    step_list = []
-    return_list = []
-
-    # 获取当前日期和时间，格式为 YYYY-MM-DD_HH-MM-SS
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     # 生成保存目录，添加当前日期和时间
     save_dir = os.path.join('./results', f"{prefix}_{name}")
     os.makedirs(save_dir, exist_ok=True)
@@ -204,6 +196,7 @@ def main(args=None, logger=None, id=None):
         for k, srdi in enumerate(srdi_list):
             next_state, reward, done, _ = srdi
             action = actions[k]
+            state = states[k]
             mask = 0.0 if done else args.gamma
             agent.append_memory(state, action, reward, next_state, mask)
 
