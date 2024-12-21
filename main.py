@@ -12,6 +12,8 @@ import gym
 import os
 from logger import Logger
 import datetime
+from tqdm import tqdm
+from vector_env import VectorEnv
 
 def readParser():
     parser = argparse.ArgumentParser(description='Diffusion Policy')
@@ -20,7 +22,7 @@ def readParser():
     parser.add_argument('--seed', type=int, default=0, metavar='N',
                         help='random seed (default: 0)')
 
-    parser.add_argument('--num_steps', type=int, default=1000000, metavar='N',
+    parser.add_argument('--num_steps', type=int, default=1500000, metavar='N',
                         help='env timesteps (default: 1000000)')
 
     parser.add_argument('--batch_size', type=int, default=256, metavar='N',
@@ -109,7 +111,7 @@ def evaluate(env, agent, steps):
         episode_reward = 0.
         done = False
         while not done:
-            action = agent.sample_action(state, eval=True)
+            action = agent.sample_action(state, eval=True)[0]
             next_state, reward, done, _ = env.step(action)
             episode_reward += reward
             state = next_state
@@ -139,6 +141,8 @@ def main(args=None, logger=None, id=None):
 
     # Initial environment
     env = gym.make(args.env_name)
+    vec_enc = VectorEnv(args.env_name, 20, args.seed)
+
     eval_env = copy.deepcopy((env))
     state_size = int(np.prod(env.observation_space.shape))
     action_size = int(np.prod(env.action_space.shape))
@@ -152,7 +156,7 @@ def main(args=None, logger=None, id=None):
 
     memory_size = 1e6
     num_steps = args.num_steps
-    start_steps = 10000
+    start_steps = 1000 # 20 samples per step, total 20000 samples for warm-up
     eval_interval = 10000
     updates_per_step = 1
     batch_size = args.batch_size
@@ -164,53 +168,45 @@ def main(args=None, logger=None, id=None):
     agent = QVPO(args, state_size, env.action_space, memory, diffusion_memory, device)
 
     steps = 0
-    episodes = 0
     best_result = -float('inf')
 
-    while steps < num_steps:
-        episode_reward = 0.
-        episode_steps = 0
+    state = env.reset()
+    states = vec_enc.reset()
+    # while steps < num_steps:
+    for i in tqdm(range(num_steps), desc="Training Progress"):
         done = False
-        state = env.reset()
-        episodes += 1
-        while not done:
-            if start_steps > steps:
-                action = env.action_space.sample()
-            else:
-                action = agent.sample_action(state, eval=False)
-            next_state, reward, done, _ = env.step(action)
 
+        if start_steps > steps:
+            actions = []
+            for j in range(20):
+                actions.append(env.action_space.sample())
+        else:
+            actions = agent.sample_action(states, eval=False)
+        
+        srdi_list, next_states = vec_enc.step(actions)
+
+        steps += 1
+        for k, srdi in enumerate(srdi_list):
+            next_state, reward, done, _ = srdi
+            action = actions[k]
             mask = 0.0 if done else args.gamma
-
-            steps += 1
-            episode_steps += 1
-            episode_reward += reward
-
             agent.append_memory(state, action, reward, next_state, mask)
 
-            if steps >= start_steps:
-                agent.train(steps, updates_per_step, batch_size=batch_size, log_writer=writer)
-                agent.entropy_alpha = min(args.entropy_alpha, max(0.002, args.entropy_alpha-steps/num_steps*args.entropy_alpha))
+        states = next_states
 
-            if steps % eval_interval == 0:
-                tmp_result = evaluate(eval_env, agent, steps)
-                if tmp_result > best_result:
-                    best_result = tmp_result
-                    agent.save_model(os.path.join('./results', prefix + '_' + name), id=id)
-                # self.save_models()
+        if steps >= start_steps:
+            agent.train(steps, updates_per_step, batch_size=batch_size, log_writer=writer)
+            agent.entropy_alpha = min(args.entropy_alpha, max(0.002, args.entropy_alpha-steps/num_steps*args.entropy_alpha))
 
-            state = next_state
+        if steps % eval_interval == 0:
+            tmp_result = evaluate(eval_env, agent, steps)
+            if tmp_result > best_result:
+                best_result = tmp_result
+                agent.save_model(os.path.join('./results', prefix + '_' + name), id=id)
+            # self.save_models()
 
         # if episodes % log_interval == 0:
         #     writer.add_scalar('reward/train', episode_reward, steps)
-
-        print(f'episode: {episodes:<4}  '
-              f'episode steps: {episode_steps:<4}  '
-              f'reward: {episode_reward:<5.1f}')
-
-        if logger is not None:
-            for i in range(episode_steps):
-                logger.add(epoch=steps-episode_steps+i, reward=episode_reward)
 
 
 if __name__ == "__main__":

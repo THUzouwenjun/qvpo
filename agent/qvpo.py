@@ -95,13 +95,16 @@ class QVPO(object):
             self.diffusion_memory.append(state, action)
 
     def sample_action(self, state, eval=False):
-        state = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
+        # 如果state是一维的，就reshape成二维的
+        if len(state.shape) == 1:
+            state = state.reshape(1, -1)
+        state = torch.FloatTensor(state).to(self.device)
 
         normal = False
         if not eval and torch.rand(1).item() <= self.epsilon:
             normal = True
 
-        action = self.actor(state, eval, q_func=self.critic, normal=normal).cpu().data.numpy().flatten()
+        action = self.actor(state, eval, q_func=self.critic, normal=normal).cpu().data.numpy()#.flatten()
         action = action.clip(-1, 1)
         action = action * self.action_scale + self.action_bias
         return action
